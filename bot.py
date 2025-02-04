@@ -2,7 +2,7 @@ from telegram import Update, Bot
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-TOKEN = 'YOUR_BOT_TOKEN'  # Вставьте ваш токен
+TOKEN = '8068604657:AAFUkVGe3OMcs8WTiqNaoKcQm9sAU3_OTDQ'  # Вставьте ваш токен
 bot = Bot(TOKEN)
 
 # Функция для обработки команды /start
