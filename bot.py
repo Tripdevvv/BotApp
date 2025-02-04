@@ -4,7 +4,7 @@ from aiogram.types import Update
 import os
 
 TOKEN = os.getenv("BOT_TOKEN")  # Токен бота (добавим в Render)
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # URL, который выдаст Render
+WEBHOOK_URL = os.getenv("https://botapp-jxld.onrender.com/")  # URL, который выдаст Render
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
