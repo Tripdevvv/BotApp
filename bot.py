@@ -10,11 +10,11 @@ import uvicorn
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Получение токена и URL вебхука из переменных окружения
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Если используем вебхук
+TOKEN = "ваш_токен_бота"
+WEBHOOK_URL = "ваш_вебхук_url"  # Указывайте URL вебхука, если используете его
+
 if not TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN не найден в переменных окружения!")
+    raise ValueError("Токен не найден!")
 
 # Создаём FastAPI-приложение
 fastapi_app = FastAPI()
