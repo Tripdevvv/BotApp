@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TOKEN = "8068604657:AAFUkVGe3OMcs8WTiqNaoKcQm9sAU3_OTDQ"
-WEBHOOK_URL = "https://botapp-aseq.onrender.com"  # Указывайте URL вебхука, если используете его
+WEBHOOK_URL = "https://botapp-aseq.onrender.com/webhook"  # Указывайте URL вебхука, если используете его
 
 if not TOKEN:
     raise ValueError("Токен не найден!")
