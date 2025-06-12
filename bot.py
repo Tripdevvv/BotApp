@@ -179,15 +179,11 @@ async def cmd_menu(message: types.Message):
         
         buttons = [
             InlineKeyboardButton(
-                text="📅 График работы",
-                url="https://docs.google.com/spreadsheets/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/edit"
+                text="📅 График (Google таблица)",
+                url="https://docs.google.com/spreadsheets/d/1vA3t57XHI6b_Honx9tRbBGhyk_dDofSHeMOjyS844lk/htmlview"
             ),
             InlineKeyboardButton(
-                text="🛒 Разрешенные продукты",
-                url="https://docs.google.com/spreadsheets/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/edit"
-            ),
-            InlineKeyboardButton(
-                text="📋 Чек-лист закупки",
+                text="🛒 Разрешенные продукты (закупка)",
                 url="https://docs.google.com/spreadsheets/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/edit"
             )
         ]
