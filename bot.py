@@ -56,6 +56,7 @@ def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # Создаем таблицу, если она не существует
         cur.execute("""
             CREATE TABLE IF NOT EXISTS photo_hashes (
                 hash TEXT PRIMARY KEY,
@@ -64,6 +65,18 @@ def init_db():
                 user_id BIGINT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+        """)
+        # Проверяем, существует ли столбец chat_id, и добавляем его, если отсутствует
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT FROM information_schema.columns
+                    WHERE table_name = 'photo_hashes' AND column_name = 'chat_id'
+                ) THEN
+                    ALTER TABLE photo_hashes ADD COLUMN chat_id BIGINT;
+                END IF;
+            END $$;
         """)
         conn.commit()
         logging.info("База данных инициализирована")
@@ -88,11 +101,16 @@ def clean_old_hashes():
         if 'conn' in locals():
             conn.close()
 
+async def periodic_cleanup():
+    while True:
+        clean_old_hashes()
+        await asyncio.sleep(14 * 24 * 60 * 60)  # 14 дней
+
 def load_hashes():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT hash, message_id, chat_id FROM photo_hashes")
+        cur.execute("SELECT hash, message_id, chat_id FROM photo_hashes WHERE chat_id IS NOT NULL")
         return {(row[0], row[2]): row[1] for row in cur.fetchall()}  # (hash, chat_id): message_id
     except Exception as e:
         logging.error(f"Ошибка при загрузке хэшей: {e}")
