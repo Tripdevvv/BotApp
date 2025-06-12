@@ -4,16 +4,16 @@ from datetime import datetime, time, timedelta
 from io import BytesIO
 import os
 
-from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
-import uvicorn
-import pytz
-import psycopg2
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from PIL import Image
 import imagehash
+import psycopg2
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
+import uvicorn
+import pytz
 
 # Настройки
 API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
@@ -46,7 +46,6 @@ def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Проверяем существование таблицы
         cur.execute("""
             CREATE TABLE IF NOT EXISTS photo_hashes (
                 hash TEXT PRIMARY KEY,
@@ -56,17 +55,13 @@ def init_db():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # Проверяем существование столбца timestamp
         cur.execute("""
             SELECT column_name 
             FROM information_schema.columns 
             WHERE table_name='photo_hashes' AND column_name='timestamp'
         """)
         if not cur.fetchone():
-            # Добавляем столбец, если он отсутствует
             cur.execute("ALTER TABLE photo_hashes ADD COLUMN timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-        
         conn.commit()
     except Exception as e:
         logging.error(f"Ошибка при инициализации БД: {e}")
@@ -78,8 +73,6 @@ def clean_old_hashes():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
-        # Проверяем наличие столбца timestamp перед очисткой
         cur.execute("""
             SELECT column_name 
             FROM information_schema.columns 
@@ -243,6 +236,13 @@ async def send_reminder_all(text: str):
             logging.error(f"Не удалось отправить сообщение в {chat_id}: {e}")
 
 async def on_startup(dp):
+    # Delete any existing webhook before starting polling
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info("Webhook deleted successfully")
+    except Exception as e:
+        logging.error(f"Error deleting webhook: {e}")
+
     init_db()
     asyncio.create_task(schedule_reminder(time(9, 45), CHECKIN_TEXT))
     asyncio.create_task(schedule_reminder(time(15, 30), SIGN_TEXT))
