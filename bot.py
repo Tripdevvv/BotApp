@@ -45,26 +45,53 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS photo_hashes (
-            hash TEXT PRIMARY KEY,
-            message_id INTEGER,
-            chat_id BIGINT,
-            user_id BIGINT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+    try:
+        # Проверяем существование таблицы
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS photo_hashes (
+                hash TEXT PRIMARY KEY,
+                message_id INTEGER,
+                chat_id BIGINT,
+                user_id BIGINT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Проверяем существование столбца timestamp
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='photo_hashes' AND column_name='timestamp'
+        """)
+        if not cur.fetchone():
+            # Добавляем столбец, если он отсутствует
+            cur.execute("ALTER TABLE photo_hashes ADD COLUMN timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Ошибка при инициализации БД: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 def clean_old_hashes():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("DELETE FROM photo_hashes WHERE timestamp < NOW() - INTERVAL '14 days'")
-        deleted = cur.rowcount
-        conn.commit()
-        logging.info(f"Удалено {deleted} старых записей из базы данных.")
+        
+        # Проверяем наличие столбца timestamp перед очисткой
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='photo_hashes' AND column_name='timestamp'
+        """)
+        if cur.fetchone():
+            cur.execute("DELETE FROM photo_hashes WHERE timestamp < NOW() - INTERVAL '14 days'")
+            deleted = cur.rowcount
+            conn.commit()
+            logging.info(f"Удалено {deleted} старых записей из базы данных.")
+        else:
+            logging.warning("Столбец timestamp отсутствует, очистка не выполнена")
     except Exception as e:
         logging.error(f"Ошибка при очистке базы: {e}")
     finally:
