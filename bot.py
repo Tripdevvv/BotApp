@@ -4,6 +4,7 @@ from datetime import datetime, time, timedelta
 from io import BytesIO
 import json
 import os
+import pytz
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -11,7 +12,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from PIL import Image
 import imagehash
 
+# Налаштування
 API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
+if not API_TOKEN:
+    raise ValueError("Переменная окружения TELEGRAM_API_TOKEN не установлена")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -77,9 +81,10 @@ CHECKOUT_TEXT = (
 )
 
 async def schedule_reminder(remind_time: time, text: str):
+    timezone = pytz.timezone("Europe/Kiev")
     while True:
-        now = datetime.now()
-        target = datetime.combine(now.date(), remind_time)
+        now = datetime.now(timezone)
+        target = datetime.combine(now.date(), remind_time, tzinfo=timezone)
         if target < now:
             target += timedelta(days=1)
         wait_seconds = (target - now).total_seconds()
@@ -93,7 +98,7 @@ async def send_reminder_all(text: str):
             await bot.send_message(chat_id, text)
             logging.info(f"Напоминание отправлено в чат {chat_id}")
         except Exception as e:
-            logging.error(f"Ошибка при отправке напоминания в чат {chat_id}: {e}")
+            logging.error(f"Ошибка при отправке напоминания в чат {chat_id}: {str(e)}", exc_info=True)
 
 @dp.message_handler(commands=['checkin'])
 async def cmd_checkin(message: types.Message):
@@ -112,21 +117,16 @@ async def cmd_sign(message: types.Message):
 
 @dp.message_handler(commands=['menu'])
 async def cmd_menu(message: types.Message):
-    # Создаем инлайн-клавиатуру
     keyboard = InlineKeyboardMarkup()
-    # Кнопка для графика
     schedule_button = InlineKeyboardButton(
         text="График",
         url="https://docs.google.com/spreadsheets/u/0/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/htmlview?pli=1"
     )
-    # Кнопка для списка продуктов
     products_button = InlineKeyboardButton(
         text="Разрешенные продукты",
         url="https://docs.google.com/spreadsheets/u/0/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/htmlview?pli=1"
     )
-    # Добавляем кнопки в клавиатуру (в один ряд)
     keyboard.row(schedule_button, products_button)
-    # Отправляем сообщение с клавиатурой
     await message.reply("Выберите опцию:", reply_markup=keyboard)
     logging.info(f"Команда /menu вызвана пользователем {message.from_user.id}")
 
@@ -154,7 +154,7 @@ async def handle_photo(message: types.Message):
     try:
         photo_hash = await get_image_hash(file_id)
     except Exception as e:
-        logging.error(f"Ошибка при получении хэша фото: {e}")
+        logging.error(f"Ошибка при получении хэша фото: {str(e)}", exc_info=True)
         await message.reply("Не удалось обработать фотографию :(")
         return
 
@@ -170,20 +170,29 @@ async def handle_photo(message: types.Message):
                 await message.answer_sticker(sticker_id)
                 await bot.forward_message(chat_id=chat_id, from_chat_id=chat_id, message_id=msg_id)
             except Exception as e:
-                logging.error(f"Ошибка пересылки сообщения: {e}")
+                logging.error(f"Ошибка пересылки сообщения: {str(e)}", exc_info=True)
             return
 
     processed_hashes[photo_hash] = message_id
     save_hashes(processed_hashes)
 
     await message.reply("Фотография принята!")
-    logging.info(f"Уникальная фотография от пользователя {user_id} обработана")
+    logging.info(f"Уникальная фотография от пользователя {user_id} оброблена")
+
+# Налаштування вебхука
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")  # Замініть на ваш URL
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 async def on_startup(dp):
+    await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(schedule_reminder(time(hour=9, minute=45), CHECKIN_TEXT))
     asyncio.create_task(schedule_reminder(time(hour=15, minute=30), SIGN_TEXT))
     asyncio.create_task(schedule_reminder(time(hour=22, minute=14), CHECKOUT_TEXT))
-    logging.info("Бот запущен и задачи по напоминаниям созданы.")
+    logging.info("Бот запущен и вебхук установлен.")
 
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+async def on_shutdown(dp):
+    await bot.delete_webhook()
+    logging.info("Бот остановлен.")
+
+if
