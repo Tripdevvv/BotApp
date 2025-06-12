@@ -55,36 +55,22 @@ def init_db():
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        cur.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='photo_hashes' AND column_name='timestamp'
-        """)
-        if not cur.fetchone():
-            cur.execute("ALTER TABLE photo_hashes ADD COLUMN timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         conn.commit()
     except Exception as e:
         logging.error(f"Ошибка при инициализации БД: {e}")
         conn.rollback()
     finally:
+        cur.close()
         conn.close()
 
 def clean_old_hashes():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='photo_hashes' AND column_name='timestamp'
-        """)
-        if cur.fetchone():
-            cur.execute("DELETE FROM photo_hashes WHERE timestamp < NOW() - INTERVAL '14 days'")
-            deleted = cur.rowcount
-            conn.commit()
-            logging.info(f"Удалено {deleted} старых записей из базы данных.")
-        else:
-            logging.warning("Столбец timestamp отсутствует, очистка не выполнена")
+        cur.execute("DELETE FROM photo_hashes WHERE timestamp < NOW() - INTERVAL '14 days'")
+        deleted = cur.rowcount
+        conn.commit()
+        logging.info(f"Удалено {deleted} старых записей из базы данных.")
     except Exception as e:
         logging.error(f"Ошибка при очистке базы: {e}")
     finally:
@@ -100,9 +86,8 @@ def load_hashes():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT hash, message_id FROM photo_hashes")
-        hashes = dict(cur.fetchall())
-        return hashes
+        cur.execute("SELECT hash, message_id, chat_id FROM photo_hashes")
+        return {(row[0], row[2]): row[1] for row in cur.fetchall()}  # (hash, chat_id): message_id
     except Exception as e:
         logging.error(f"Ошибка при загрузке хэшей: {e}")
         return {}
@@ -126,7 +111,8 @@ def save_hash(hash_value: str, message_id: int, chat_id: int, user_id: int):
         if 'conn' in locals():
             conn.close()
 
-processed_hashes = load_hashes()
+# Глобальная переменная для хранения хэшей
+photo_hashes = load_hashes()
 
 CHECKIN_TEXT = (
     "Напоминаю сделать чек-ин в основном боте @PizzaDayStaffBot, не сделанный чек-ин — потеря денюжек :(\n\n"
@@ -193,30 +179,53 @@ def hamming_distance(hash1: str, hash2: str) -> int:
         return float('inf')
 
 async def get_image_hash(file_id: str) -> str:
-    file = await bot.get_file(file_id)
-    byte_stream = await bot.download_file(file.file_path)
-    image = Image.open(BytesIO(byte_stream.read())).convert("RGB")
-    return str(imagehash.phash(image))
+    try:
+        file = await bot.get_file(file_id)
+        byte_stream = BytesIO()
+        await file.download(destination_file=byte_stream)
+        image = Image.open(byte_stream).convert("RGB")
+        return str(imagehash.phash(image))
+    except Exception as e:
+        logging.error(f"Ошибка при получении хэша изображения: {e}")
+        return ""
 
 @dp.message_handler(content_types=['photo'])
 async def handle_photo(message: types.Message):
     if message.chat.id not in chat_ids:
         return
-    photo = message.photo[-1]
-    photo_hash = await get_image_hash(photo.file_id)
-
-    for saved_hash, saved_msg_id in processed_hashes.items():
-        if hamming_distance(photo_hash, saved_hash) <= MAX_HAMMING_DISTANCE:
-            await message.reply(
-                f"Это фото уже очень похоже на ранее загруженное. Предыдущее сообщение #{saved_msg_id} 📸"
-            )
-            await message.answer_sticker(sticker_id)
-            await bot.forward_message(chat_id=message.chat.id, from_chat_id=message.chat.id, message_id=saved_msg_id)
+    
+    try:
+        photo = message.photo[-1]
+        photo_hash = await get_image_hash(photo.file_id)
+        
+        if not photo_hash:
+            await message.reply("Не удалось обработать фотографию. Пожалуйста, попробуйте еще раз.")
             return
-
-    processed_hashes[photo_hash] = message.message_id
-    save_hash(photo_hash, message.message_id, message.chat.id, message.from_user.id)
-    await message.reply("Фотография принята!")
+        
+        # Проверяем только хэши из текущего чата
+        duplicate_found = False
+        for (saved_hash, saved_chat_id), saved_msg_id in photo_hashes.items():
+            if saved_chat_id == message.chat.id and hamming_distance(photo_hash, saved_hash) <= MAX_HAMMING_DISTANCE:
+                duplicate_found = True
+                await message.reply(
+                    f"⚠️ Это фото похоже на ранее загруженное (сообщение #{saved_msg_id})"
+                )
+                await message.answer_sticker(sticker_id)
+                await bot.forward_message(
+                    chat_id=message.chat.id,
+                    from_chat_id=message.chat.id,
+                    message_id=saved_msg_id
+                )
+                break
+        
+        if not duplicate_found:
+            photo_hashes[(photo_hash, message.chat.id)] = message.message_id
+            save_hash(photo_hash, message.message_id, message.chat.id, message.from_user.id)
+            await message.reply("✅ Фотография принята!")
+            
+    except Exception as e:
+        logging.error(f"Ошибка при обработке фото: {e}")
+        await message.reply("Произошла ошибка при обработке фотографии. Пожалуйста, попробуйте еще раз.")
 
 async def schedule_reminder(remind_time: time, text: str):
     timezone = pytz.timezone("Europe/Kiev")
@@ -236,7 +245,6 @@ async def send_reminder_all(text: str):
             logging.error(f"Не удалось отправить сообщение в {chat_id}: {e}")
 
 async def on_startup(dp):
-    # Delete any existing webhook before starting polling
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logging.info("Webhook deleted successfully")
