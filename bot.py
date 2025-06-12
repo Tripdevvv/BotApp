@@ -12,7 +12,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from PIL import Image
 import imagehash
 
-# Налаштування
 API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
 if not API_TOKEN:
     raise ValueError("Переменная окружения TELEGRAM_API_TOKEN не установлена")
@@ -23,11 +22,11 @@ bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-chat_ids = [7481122885, 987654321]  # Вставь свои chat_id
+chat_ids = [7481122885, 987654321]
 sticker_id = 'CAACAgIAAyEFAASrJ8mAAANMaErQZWKogCvCcFz9Lsbau15gV2EAAvkfAAIbjKlKW3Z0JKAra_42BA'
 
 HASHES_FILE = 'photo_hashes.json'
-MAX_HAMMING_DISTANCE = 5  # Порог похожести (можно подстроить)
+MAX_HAMMING_DISTANCE = 5
 
 def load_hashes():
     if not os.path.exists(HASHES_FILE):
@@ -177,10 +176,9 @@ async def handle_photo(message: types.Message):
     save_hashes(processed_hashes)
 
     await message.reply("Фотография принята!")
-    logging.info(f"Уникальная фотография от пользователя {user_id} оброблена")
+    logging.info(f"Уникальная фотография от пользователя {user_id} обработана")
 
-# Налаштування вебхука
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")  # Замініть на ваш URL
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -195,4 +193,13 @@ async def on_shutdown(dp):
     await bot.delete_webhook()
     logging.info("Бот остановлен.")
 
-if
+if __name__ == '__main__':
+    executor.start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host='0.0.0.0',
+        port=int(os.getenv('PORT', 10000))
+    )
