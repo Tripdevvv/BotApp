@@ -162,7 +162,7 @@ async def cmd_checkout(message: types.Message):
         await message.reply(CHECKOUT_TEXT)
         logging.info(f"Команда /checkout вызвана пользователем {message.from_user.id}")
     except Exception as e:
-        logging.error(f"Ошибка в cmd_checkout: {str(e)}")
+        logging.error(f"Ошибка в - cmd_checkout: {str(e)}")
 
 @dp.message_handler(commands=['sign'])
 async def cmd_sign(message: types.Message):
