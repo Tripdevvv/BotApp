@@ -7,6 +7,7 @@ import os
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from PIL import Image
 import imagehash
 
@@ -108,6 +109,26 @@ async def cmd_checkout(message: types.Message):
 async def cmd_sign(message: types.Message):
     await message.reply(SIGN_TEXT)
     logging.info(f"Команда /sign вызвана пользователем {message.from_user.id}")
+
+@dp.message_handler(commands=['menu'])
+async def cmd_menu(message: types.Message):
+    # Создаем инлайн-клавиатуру
+    keyboard = InlineKeyboardMarkup()
+    # Кнопка для графика
+    schedule_button = InlineKeyboardButton(
+        text="График",
+        url="https://docs.google.com/spreadsheets/u/0/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/htmlview?pli=1"
+    )
+    # Кнопка для списка продуктов
+    products_button = InlineKeyboardButton(
+        text="Разрешенные продукты",
+        url="https://docs.google.com/spreadsheets/u/0/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/htmlview?pli=1"
+    )
+    # Добавляем кнопки в клавиатуру (в один ряд)
+    keyboard.row(schedule_button, products_button)
+    # Отправляем сообщение с клавиатурой
+    await message.reply("Выберите опцию:", reply_markup=keyboard)
+    logging.info(f"Команда /menu вызвана пользователем {message.from_user.id}")
 
 async def get_image_hash(file_id: str) -> str:
     file = await bot.get_file(file_id)
