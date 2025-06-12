@@ -236,7 +236,7 @@ async def on_startup(dp):
         await bot.set_webhook(WEBHOOK_URL)
         asyncio.create_task(schedule_reminder(time(hour=9, minute=45), CHECKIN_TEXT))
         asyncio.create_task(schedule_reminder(time(hour=15, minute=30), SIGN_TEXT))
-        asyncio.create_task(schedule_reminder(time(hour=22, minute14), CHECKOUT_TEXT))  # Виправлено minute
+        asyncio.create_task(schedule_reminder(time(hour=22, minute=14), CHECKOUT_TEXT))  # Виправлено minute
         logging.info("Бот запущен и вебхук установлен.")
     except Exception as e:
         logging.error(f"Ошибка при старте бота: {str(e)}", exc_info=True)
