@@ -4,7 +4,8 @@ from datetime import datetime, time, timedelta
 from io import BytesIO
 import os
 import pytz
-import sqlite3
+import psycopg2
+import json
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -23,48 +24,56 @@ bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-chat_ids = [7481122885, 987654321]  # Вставь свои chat_id
+chat_ids = [7481122885, 987654321]
 sticker_id = 'CAACAgIAAyEFAASrJ8mAAANMaErQZWKogCvCcFz9Lsbau15gV2EAAvkfAAIbjKlKW3Z0JKAra_42BA'
 
-DB_FILE = os.path.join('/tmp', 'photo_hashes.db')  # База даних у тимчасовій директорії
-MAX_HAMMING_DISTANCE = 5  # Порог похожести
+# Настройка подключения к PostgreSQL
+DB_URL = "postgresql://tgbotbdhash_owner:npg_gfBetc17QRZO@ep-lingering-glade-a8g30xtc-pooler.eastus2.azure.neon.tech/tgbotbdhash?sslmode=require"
+MAX_HAMMING_DISTANCE = 5
 
 def init_db():
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS hashes (hash TEXT PRIMARY KEY, message_id INTEGER)''')
+        conn = psycopg2.connect(DB_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS photo_hashes (
+                hash TEXT PRIMARY KEY,
+                message_id INTEGER
+            )
+        """)
         conn.commit()
+        logging.info("Таблица photo_hashes успешно создана или уже существует.")
     except Exception as e:
-        logging.error(f"Ошибка при инициализации базы данных: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка при инициализации базы данных: {str(e)}")
     finally:
         conn.close()
 
 def load_hashes():
-    init_db()
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("SELECT hash, message_id FROM hashes")
-        hashes = dict(c.fetchall())
+        conn = psycopg2.connect(DB_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT hash, message_id FROM photo_hashes")
+        hashes = dict(cur.fetchall())
         logging.info(f"Загружено {len(hashes)} хэшей из базы данных.")
         return hashes
     except Exception as e:
-        logging.error(f"Ошибка при загрузке хэшей: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка при загрузке хэшей: {str(e)}")
         return {}
     finally:
         conn.close()
 
 def save_hashes(hashes_dict):
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("DELETE FROM hashes")  # Очищаємо таблицю перед оновленням
-        c.executemany("INSERT INTO hashes (hash, message_id) VALUES (?, ?)", hashes_dict.items())
+        conn = psycopg2.connect(DB_URL)
+        cur = conn.cursor()
+        # Очищаем таблицу и вставляем новые данные
+        cur.execute("DELETE FROM photo_hashes")
+        for hash_value, msg_id in hashes_dict.items():
+            cur.execute("INSERT INTO photo_hashes (hash, message_id) VALUES (%s, %s)", (hash_value, msg_id))
         conn.commit()
-        logging.info(f"Хэши успешно сохранены в {DB_FILE}")
+        logging.info(f"Хэши успешно сохранены в базе данных.")
     except Exception as e:
-        logging.error(f"Ошибка при сохранении хэшей в {DB_FILE}: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка при сохранении хэшей: {str(e)}")
     finally:
         conn.close()
 
@@ -107,7 +116,7 @@ CHECKOUT_TEXT = (
 )
 
 async def schedule_reminder(remind_time: time, text: str):
-    timezone = pytz.timezone("Europe/Kiev")  # EEST, UTC+3
+    timezone = pytz.timezone("Europe/Kiev")
     while True:
         try:
             now = datetime.now(timezone)
@@ -119,8 +128,8 @@ async def schedule_reminder(remind_time: time, text: str):
             await asyncio.sleep(wait_seconds)
             await send_reminder_all(text)
         except Exception as e:
-            logging.error(f"Ошибка в schedule_reminder: {str(e)}", exc_info=True)
-            await asyncio.sleep(60)  # Пауза перед повторною спробою
+            logging.error(f"Ошибка в schedule_reminder: {str(e)}")
+            await asyncio.sleep(60)
 
 async def send_reminder_all(text: str):
     for chat_id in chat_ids:
@@ -128,7 +137,7 @@ async def send_reminder_all(text: str):
             await bot.send_message(chat_id, text)
             logging.info(f"Напоминание отправлено в чат {chat_id}")
         except Exception as e:
-            logging.error(f"Ошибка при отправке напоминания в чат {chat_id}: {str(e)}", exc_info=True)
+            logging.error(f"Ошибка при отправке напоминания в чат {chat_id}: {str(e)}")
 
 @dp.message_handler(commands=['checkin'])
 async def cmd_checkin(message: types.Message):
@@ -136,7 +145,7 @@ async def cmd_checkin(message: types.Message):
         await message.reply(CHECKIN_TEXT)
         logging.info(f"Команда /checkin вызвана пользователем {message.from_user.id}")
     except Exception as e:
-        logging.error(f"Ошибка в cmd_checkin: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка в cmd_checkin: {str(e)}")
 
 @dp.message_handler(commands=['checkout'])
 async def cmd_checkout(message: types.Message):
@@ -144,7 +153,7 @@ async def cmd_checkout(message: types.Message):
         await message.reply(CHECKOUT_TEXT)
         logging.info(f"Команда /checkout вызвана пользователем {message.from_user.id}")
     except Exception as e:
-        logging.error(f"Ошибка в cmd_checkout: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка в cmd_checkout: {str(e)}")
 
 @dp.message_handler(commands=['sign'])
 async def cmd_sign(message: types.Message):
@@ -152,7 +161,7 @@ async def cmd_sign(message: types.Message):
         await message.reply(SIGN_TEXT)
         logging.info(f"Команда /sign вызвана пользователем {message.from_user.id}")
     except Exception as e:
-        logging.error(f"Ошибка в cmd_sign: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка в cmd_sign: {str(e)}")
 
 @dp.message_handler(commands=['menu'])
 async def cmd_menu(message: types.Message):
@@ -170,20 +179,7 @@ async def cmd_menu(message: types.Message):
         await message.reply("Выберите опцию:", reply_markup=keyboard)
         logging.info(f"Команда /menu вызвана пользователем {message.from_user.id}")
     except Exception as e:
-        logging.error(f"Ошибка в cmd_menu: {str(e)}", exc_info=True)
-
-@dp.message_handler(commands=['show_hashes'])
-async def cmd_show_hashes(message: types.Message):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT hash, message_id FROM hashes")
-    hashes = c.fetchall()
-    conn.close()
-    if hashes:
-        response = "\n".join([f"Hash: {h[0]}, Message ID: {h[1]}" for h in hashes])
-        await message.reply(f"Сохранённые хэши:\n{response}")
-    else:
-        await message.reply("Нет сохранённых хэшей.")
+        logging.error(f"Ошибка в cmd_menu: {str(e)}")
 
 async def get_image_hash(file_id: str) -> str:
     try:
@@ -194,14 +190,14 @@ async def get_image_hash(file_id: str) -> str:
         hash_str = str(imagehash.phash(image))
         return hash_str
     except Exception as e:
-        logging.error(f"Ошибка при получении хэша фото: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка при получении хэша фото: {str(e)}")
         raise
 
 def hamming_distance(hash1: str, hash2: str) -> int:
     try:
         return bin(int(hash1, 16) ^ int(hash2, 16)).count('1')
     except Exception as e:
-        logging.error(f"Ошибка при вычислении Hamming расстояния: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка при вычислении Hamming расстояния: {str(e)}")
         return float('inf')
 
 @dp.message_handler(content_types=['photo'])
@@ -231,16 +227,16 @@ async def handle_photo(message: types.Message):
 
         processed_hashes[photo_hash] = message_id
         save_hashes(processed_hashes)
-        logging.info(f"Текущие хэши: {processed_hashes}")  # Для відладки
+        logging.info(f"Текущие хэши: {processed_hashes}")
 
         await message.reply("Фотография принята!")
         logging.info(f"Уникальная фотография от пользователя {user_id} обработана")
     except Exception as e:
-        logging.error(f"Ошибка в handle_photo: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка в handle_photo: {str(e)}")
         await message.reply("Произошла ошибка при обработке фотографии :(")
 
 # Налаштування вебхука
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")  # Замініть на ваш URL
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -249,28 +245,26 @@ async def on_startup(dp):
         await bot.set_webhook(WEBHOOK_URL)
         asyncio.create_task(schedule_reminder(time(hour=9, minute=45), CHECKIN_TEXT))
         asyncio.create_task(schedule_reminder(time(hour=15, minute=30), SIGN_TEXT))
-        asyncio.create_task(schedule_reminder(time(hour=22, minute=14), CHECKOUT_TEXT))  # Виправлено minute
+        asyncio.create_task(schedule_reminder(time(hour=22, minute=14), CHECKOUT_TEXT))
+        init_db()  # Инициализация таблицы при старте
         logging.info("Бот запущен и вебхук установлен.")
     except Exception as e:
-        logging.error(f"Ошибка при старте бота: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка при старте бота: {str(e)}")
 
 async def on_shutdown(dp):
     try:
         await bot.delete_webhook()
         logging.info("Бот остановлен.")
     except Exception as e:
-        logging.error(f"Ошибка при остановке бота: {str(e)}", exc_info=True)
+        logging.error(f"Ошибка при остановке бота: {str(e)}")
 
 if __name__ == '__main__':
-    try:
-        executor.start_webhook(
-            dispatcher=dp,
-            webhook_path=WEBHOOK_PATH,
-            on_startup=on_startup,
-            on_shutdown=on_shutdown,
-            skip_updates=True,
-            host='0.0.0.0',
-            port=int(os.getenv('PORT', 10000))
-        )
-    except Exception as e:
-        logging.error(f"Ошибка при запуске вебхука: {str(e)}", exc_info=True)
+    executor.start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host='0.0.0.0',
+        port=int(os.getenv('PORT', 10000))
+    )
