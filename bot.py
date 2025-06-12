@@ -5,7 +5,6 @@ from io import BytesIO
 import os
 import pytz
 import psycopg2
-import json
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -24,21 +23,27 @@ bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-chat_ids = [7481122885, 987654321]
+chat_ids = [7481122885, 987654321]  # Убедитесь, что это правильные chat_id
 sticker_id = 'CAACAgIAAyEFAASrJ8mAAANMaErQZWKogCvCcFz9Lsbau15gV2EAAvkfAAIbjKlKW3Z0JKAra_42BA'
 
 # Настройка подключения к PostgreSQL
 DB_URL = "postgresql://tgbotbdhash_owner:npg_gfBetc17QRZO@ep-lingering-glade-a8g30xtc-pooler.eastus2.azure.neon.tech/tgbotbdhash?sslmode=require"
 MAX_HAMMING_DISTANCE = 5
 
+def get_db_connection():
+    return psycopg2.connect(DB_URL)
+
 def init_db():
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS photo_hashes (
                 hash TEXT PRIMARY KEY,
-                message_id INTEGER
+                message_id INTEGER,
+                chat_id BIGINT,
+                user_id BIGINT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         conn.commit()
@@ -46,11 +51,12 @@ def init_db():
     except Exception as e:
         logging.error(f"Ошибка при инициализации базы данных: {str(e)}")
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
 def load_hashes():
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT hash, message_id FROM photo_hashes")
         hashes = dict(cur.fetchall())
@@ -60,22 +66,25 @@ def load_hashes():
         logging.error(f"Ошибка при загрузке хэшей: {str(e)}")
         return {}
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
-def save_hashes(hashes_dict):
+def save_hash(hash_value: str, message_id: int, chat_id: int, user_id: int):
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = get_db_connection()
         cur = conn.cursor()
-        # Очищаем таблицу и вставляем новые данные
-        cur.execute("DELETE FROM photo_hashes")
-        for hash_value, msg_id in hashes_dict.items():
-            cur.execute("INSERT INTO photo_hashes (hash, message_id) VALUES (%s, %s)", (hash_value, msg_id))
+        cur.execute(
+            "INSERT INTO photo_hashes (hash, message_id, chat_id, user_id) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (hash) DO NOTHING",
+            (hash_value, message_id, chat_id, user_id)
+        )
         conn.commit()
-        logging.info(f"Хэши успешно сохранены в базе данных.")
+        logging.info(f"Хэш успешно сохранен в базе данных.")
     except Exception as e:
-        logging.error(f"Ошибка при сохранении хэшей: {str(e)}")
+        logging.error(f"Ошибка при сохранении хэша: {str(e)}")
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
 processed_hashes = load_hashes()
 
@@ -166,17 +175,26 @@ async def cmd_sign(message: types.Message):
 @dp.message_handler(commands=['menu'])
 async def cmd_menu(message: types.Message):
     try:
-        keyboard = InlineKeyboardMarkup()
-        schedule_button = InlineKeyboardButton(
-            text="График",
-            url="https://docs.google.com/spreadsheets/u/0/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/htmlview?pli=1"
-        )
-        products_button = InlineKeyboardButton(
-            text="Разрешенные продукты",
-            url="https://docs.google.com/spreadsheets/u/0/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/htmlview?pli=1"
-        )
-        keyboard.row(schedule_button, products_button)
-        await message.reply("Выберите опцию:", reply_markup=keyboard)
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        
+        buttons = [
+            InlineKeyboardButton(
+                text="📅 График работы",
+                url="https://docs.google.com/spreadsheets/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/edit"
+            ),
+            InlineKeyboardButton(
+                text="🛒 Разрешенные продукты",
+                url="https://docs.google.com/spreadsheets/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/edit"
+            ),
+            InlineKeyboardButton(
+                text="📋 Чек-лист закупки",
+                url="https://docs.google.com/spreadsheets/d/1HtCpJSc_Y8MF4BcYzYaz6rL7RvzrPY7s/edit"
+            )
+        ]
+        
+        keyboard.add(*buttons)
+        
+        await message.reply("📌 Доступные ресурсы:", reply_markup=keyboard)
         logging.info(f"Команда /menu вызвана пользователем {message.from_user.id}")
     except Exception as e:
         logging.error(f"Ошибка в cmd_menu: {str(e)}")
@@ -203,6 +221,9 @@ def hamming_distance(hash1: str, hash2: str) -> int:
 @dp.message_handler(content_types=['photo'])
 async def handle_photo(message: types.Message):
     try:
+        if message.chat.id not in chat_ids:
+            return
+            
         photo = message.photo[-1]
         user_id = message.from_user.id
         chat_id = message.chat.id
@@ -213,21 +234,21 @@ async def handle_photo(message: types.Message):
 
         photo_hash = await get_image_hash(file_id)
 
-        for saved_hash, msg_id in processed_hashes.items():
+        for saved_hash, saved_msg_id in processed_hashes.items():
             dist = hamming_distance(photo_hash, saved_hash)
             if dist <= MAX_HAMMING_DISTANCE:
                 logging.info(f"Фото похожее найдено с расстоянием {dist}: {photo_hash} vs {saved_hash}")
                 await message.reply(
                     f"Это фото уже очень похоже на ранее загруженное (похожесть: {dist}). "
-                    f"Предыдущее сообщение #{msg_id}"
+                    f"Предыдущее сообщение #{saved_msg_id}"
                 )
                 await message.answer_sticker(sticker_id)
-                await bot.forward_message(chat_id=chat_id, from_chat_id=chat_id, message_id=msg_id)
+                await bot.forward_message(chat_id=chat_id, from_chat_id=chat_id, message_id=saved_msg_id)
                 return
 
         processed_hashes[photo_hash] = message_id
-        save_hashes(processed_hashes)
-        logging.info(f"Текущие хэши: {processed_hashes}")
+        save_hash(photo_hash, message_id, chat_id, user_id)
+        logging.info(f"Новый хэш добавлен: {photo_hash}")
 
         await message.reply("Фотография принята!")
         logging.info(f"Уникальная фотография от пользователя {user_id} обработана")
@@ -235,36 +256,41 @@ async def handle_photo(message: types.Message):
         logging.error(f"Ошибка в handle_photo: {str(e)}")
         await message.reply("Произошла ошибка при обработке фотографии :(")
 
-# Налаштування вебхука
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-
 async def on_startup(dp):
     try:
-        await bot.set_webhook(WEBHOOK_URL)
+        init_db()  # Инициализация таблицы при старте
+        
+        # Если используете вебхуки, раскомментируйте следующую строку
+        # await bot.set_webhook(WEBHOOK_URL)
+        
+        # Запуск напоминаний
         asyncio.create_task(schedule_reminder(time(hour=9, minute=45), CHECKIN_TEXT))
         asyncio.create_task(schedule_reminder(time(hour=15, minute=30), SIGN_TEXT))
         asyncio.create_task(schedule_reminder(time(hour=22, minute=14), CHECKOUT_TEXT))
-        init_db()  # Инициализация таблицы при старте
-        logging.info("Бот запущен и вебхук установлен.")
+        
+        logging.info("Бот успешно запущен")
     except Exception as e:
         logging.error(f"Ошибка при старте бота: {str(e)}")
 
 async def on_shutdown(dp):
     try:
-        await bot.delete_webhook()
-        logging.info("Бот остановлен.")
+        # Если используете вебхуки, раскомментируйте следующую строку
+        # await bot.delete_webhook()
+        logging.info("Бот остановлен")
     except Exception as e:
         logging.error(f"Ошибка при остановке бота: {str(e)}")
 
 if __name__ == '__main__':
-    executor.start_webhook(
-        dispatcher=dp,
-        webhook_path=WEBHOOK_PATH,
-        on_startup=on_startup,
-        on_shutdown=on_shutdown,
-        skip_updates=True,
-        host='0.0.0.0',
-        port=int(os.getenv('PORT', 10000))
-    )
+    # Для локального тестирования без вебхуков
+    executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown, skip_updates=True)
+    
+    # Для работы с вебхуками (например, на Render)
+    # executor.start_webhook(
+    #     dispatcher=dp,
+    #     webhook_path=WEBHOOK_PATH,
+    #     on_startup=on_startup,
+    #     on_shutdown=on_shutdown,
+    #     skip_updates=True,
+    #     host='0.0.0.0',
+    #     port=int(os.getenv('PORT', 10000))
+    # )
