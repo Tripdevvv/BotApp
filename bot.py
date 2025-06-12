@@ -172,6 +172,19 @@ async def cmd_menu(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка в cmd_menu: {str(e)}", exc_info=True)
 
+@dp.message_handler(commands=['show_hashes'])
+async def cmd_show_hashes(message: types.Message):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT hash, message_id FROM hashes")
+    hashes = c.fetchall()
+    conn.close()
+    if hashes:
+        response = "\n".join([f"Hash: {h[0]}, Message ID: {h[1]}" for h in hashes])
+        await message.reply(f"Сохранённые хэши:\n{response}")
+    else:
+        await message.reply("Нет сохранённых хэшей.")
+
 async def get_image_hash(file_id: str) -> str:
     try:
         file = await bot.get_file(file_id)
