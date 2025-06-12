@@ -102,6 +102,7 @@ def clean_old_hashes():
             conn.close()
 
 async def periodic_cleanup():
+    logging.info("Запуск периодической очистки базы данных")
     while True:
         clean_old_hashes()
         await asyncio.sleep(14 * 24 * 60 * 60)  # 14 дней
@@ -287,7 +288,7 @@ async def on_startup(dp):
     asyncio.create_task(schedule_reminder(time(15, 30), SIGN_TEXT))
     asyncio.create_task(schedule_reminder(time(22, 14), CHECKOUT_TEXT))
     asyncio.create_task(periodic_cleanup())
-    logging.info("Бот запущен")
+    logging.info("Бот запущен и все задачи созданы")
 
 def run_fastapi():
     port = int(os.getenv("PORT", 10000))
@@ -296,6 +297,7 @@ def run_fastapi():
         uvicorn.run(app, host="0.0.0.0", port=port)
     except Exception as e:
         logging.error(f"Failed to start FastAPI: {e}")
+        raise
 
 if __name__ == '__main__':
     # Запускаем FastAPI в отдельном потоке
