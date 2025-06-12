@@ -1,5 +1,7 @@
 aiogram==2.25.1
-Pillow
+python-dotenv
+pillow
 imagehash
-pytz
 psycopg2-binary
+fastapi
+uvicorn
