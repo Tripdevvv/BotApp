@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 import os
 import pytz
+import sqlite3
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -12,6 +13,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from PIL import Image
 import imagehash
 
+# Налаштування
 API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
 if not API_TOKEN:
     raise ValueError("Переменная окружения TELEGRAM_API_TOKEN не установлена")
@@ -22,24 +24,41 @@ bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-chat_ids = [7481122885, 987654321]
+chat_ids = [7481122885, 987654321]  # Вставь свои chat_id
 sticker_id = 'CAACAgIAAyEFAASrJ8mAAANMaErQZWKogCvCcFz9Lsbau15gV2EAAvkfAAIbjKlKW3Z0JKAra_42BA'
 
-HASHES_FILE = 'photo_hashes.json'
-MAX_HAMMING_DISTANCE = 5
+DB_FILE = os.path.join('/tmp', 'photo_hashes.db')  # База даних у тимчасовій директорії
+MAX_HAMMING_DISTANCE = 5  # Порог похожести
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS hashes (hash TEXT PRIMARY KEY, message_id INTEGER)''')
+    conn.commit()
+    conn.close()
 
 def load_hashes():
-    if not os.path.exists(HASHES_FILE):
-        logging.info("Файл с хешами не найден, создаём новый.")
-        return {}
-    with open(HASHES_FILE, 'r') as f:
-        data = json.load(f)
-    logging.info(f"Загружено {len(data)} хэшей из файла.")
-    return data
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT hash, message_id FROM hashes")
+    hashes = dict(c.fetchall())
+    conn.close()
+    logging.info(f"Загружено {len(hashes)} хэшей из базы данных.")
+    return hashes
 
 def save_hashes(hashes_dict):
-    with open(HASHES_FILE, 'w') as f:
-        json.dump(hashes_dict, f)
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("DELETE FROM hashes")  # Очищаємо таблицю перед оновленням
+        c.executemany("INSERT INTO hashes (hash, message_id) VALUES (?, ?)", hashes_dict.items())
+        conn.commit()
+        logging.info(f"Хэши успешно сохранены в {DB_FILE}")
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении хэшей в {DB_FILE}: {str(e)}", exc_info=True)
+    finally:
+        conn.close()
 
 processed_hashes = load_hashes()
 
@@ -80,7 +99,7 @@ CHECKOUT_TEXT = (
 )
 
 async def schedule_reminder(remind_time: time, text: str):
-    timezone = pytz.timezone("Europe/Kiev")
+    timezone = pytz.timezone("Europe/Kiev")  # EEST, UTC+3
     while True:
         now = datetime.now(timezone)
         target = datetime.combine(now.date(), remind_time, tzinfo=timezone)
@@ -174,11 +193,13 @@ async def handle_photo(message: types.Message):
 
     processed_hashes[photo_hash] = message_id
     save_hashes(processed_hashes)
+    logging.info(f"Текущие хэши: {processed_hashes}")  # Для відладки
 
     await message.reply("Фотография принята!")
     logging.info(f"Уникальная фотография от пользователя {user_id} обработана")
 
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")
+# Налаштування вебхука
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "https://botapp-c4qw.onrender.com")  # Замініть на ваш URL
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
