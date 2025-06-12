@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from threading import Thread
 from datetime import datetime, time, timedelta
 from io import BytesIO
 import os
@@ -15,7 +16,10 @@ from starlette.middleware.cors import CORSMiddleware
 import uvicorn
 import pytz
 
-# Настройки
+# Настройки логирования
+logging.basicConfig(level=logging.INFO)
+
+# Настройки бота
 API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
 if not API_TOKEN:
     raise ValueError("Переменная окружения TELEGRAM_API_TOKEN не установлена")
@@ -25,8 +29,7 @@ MAX_HAMMING_DISTANCE = 5
 chat_ids = [7481122885, 987654321]
 sticker_id = 'CAACAgIAAyEFAASrJ8mAAANMaErQZWKogCvCcFz9Lsbau15gV2EAAvkfAAIbjKlKW3Z0JKAra_42BA'
 
-logging.basicConfig(level=logging.INFO)
-
+# Инициализация бота
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
@@ -37,8 +40,15 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 async def root():
+    logging.info("Root endpoint called")
     return {"status": "Bot is alive!"}
 
+@app.get("/health")
+async def health_check():
+    logging.info("Health check endpoint called")
+    return {"status": "healthy"}
+
+# Функции для работы с базой данных
 def get_db_connection():
     return psycopg2.connect(DB_URL)
 
@@ -56,6 +66,7 @@ def init_db():
             )
         """)
         conn.commit()
+        logging.info("База данных инициализирована")
     except Exception as e:
         logging.error(f"Ошибка при инициализации БД: {e}")
         conn.rollback()
@@ -76,11 +87,6 @@ def clean_old_hashes():
     finally:
         if 'conn' in locals():
             conn.close()
-
-async def periodic_cleanup():
-    while True:
-        clean_old_hashes()
-        await asyncio.sleep(14 * 24 * 60 * 60)  # 14 дней
 
 def load_hashes():
     try:
@@ -105,6 +111,7 @@ def save_hash(hash_value: str, message_id: int, chat_id: int, user_id: int):
             (hash_value, message_id, chat_id, user_id)
         )
         conn.commit()
+        logging.info(f"Хэш сохранен: {hash_value}")
     except Exception as e:
         logging.error(f"Ошибка при сохранении хэша: {e}")
     finally:
@@ -114,6 +121,7 @@ def save_hash(hash_value: str, message_id: int, chat_id: int, user_id: int):
 # Глобальная переменная для хранения хэшей
 photo_hashes = load_hashes()
 
+# Тексты напоминаний
 CHECKIN_TEXT = (
     "Напоминаю сделать чек-ин в основном боте @PizzaDayStaffBot, не сделанный чек-ин — потеря денюжек :(\n\n"
     "1. Фото включенных телевизоров\n"
@@ -150,6 +158,7 @@ CHECKOUT_TEXT = (
     "4. Температура в вертикальном холодильнике"
 )
 
+# Обработчики команд
 @dp.message_handler(commands=['menu'])
 async def cmd_menu(message: types.Message):
     keyboard = InlineKeyboardMarkup(row_width=1)
@@ -172,6 +181,7 @@ async def cmd_checkout(message: types.Message):
 async def cmd_sign(message: types.Message):
     await message.reply(SIGN_TEXT)
 
+# Обработка фотографий
 def hamming_distance(hash1: str, hash2: str) -> int:
     try:
         return bin(int(hash1, 16) ^ int(hash2, 16)).count('1')
@@ -227,6 +237,7 @@ async def handle_photo(message: types.Message):
         logging.error(f"Ошибка при обработке фото: {e}")
         await message.reply("Произошла ошибка при обработке фотографии. Пожалуйста, попробуйте еще раз.")
 
+# Планировщик напоминаний
 async def schedule_reminder(remind_time: time, text: str):
     timezone = pytz.timezone("Europe/Kiev")
     while True:
@@ -241,9 +252,11 @@ async def send_reminder_all(text: str):
     for chat_id in chat_ids:
         try:
             await bot.send_message(chat_id, text)
+            logging.info(f"Напоминание отправлено в чат {chat_id}")
         except Exception as e:
             logging.error(f"Не удалось отправить сообщение в {chat_id}: {e}")
 
+# Запуск бота
 async def on_startup(dp):
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -258,7 +271,18 @@ async def on_startup(dp):
     asyncio.create_task(periodic_cleanup())
     logging.info("Бот запущен")
 
+def run_fastapi():
+    port = int(os.getenv("PORT", 10000))
+    logging.info(f"Starting FastAPI on port: {port}")
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        logging.error(f"Failed to start FastAPI: {e}")
+
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(executor.start_polling(dp, on_startup=on_startup, skip_updates=True))
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    # Запускаем FastAPI в отдельном потоке
+    fastapi_thread = Thread(target=run_fastapi, daemon=True)
+    fastapi_thread.start()
+
+    # Запускаем Telegram-бота
+    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
