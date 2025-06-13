@@ -217,6 +217,6 @@ def run_fastapi():
 
 if __name__ == '__main__':
     fastapi_thread = Thread(target=run_fastapi, daemon=True)
-    fastapi_thread.start()
+    fastapi_thread.start() 
 
     executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
