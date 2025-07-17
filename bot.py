@@ -1,80 +1,96 @@
 import asyncio
-from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from datetime import datetime, timedelta
 
 API_TOKEN = '7234829726:AAHI1Cx9n-gt0Jxo-8UnpLE6-5HJHCHKo-I'
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
+# временное хранилище
+user_data = {}  # user_id: {region, stage, name, date}
 products = []
-user_states = {}
 
-regions = ["Днепр", "Киев", "Львов"]
-
-region_keyboard = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text=region, callback_data=f"region_{region}")] for region in regions
-    ]
+# клавиатура для выбора региона
+region_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Днепр")],
+        [KeyboardButton(text="Киев")],
+        [KeyboardButton(text="Львов")]
+    ],
+    resize_keyboard=True
 )
 
 @dp.message(CommandStart())
 async def start(message: Message):
-    await message.answer("👋 Привет! Выбери регион:", reply_markup=region_keyboard)
-
-@dp.callback_query(F.data.startswith("region_"))
-async def region_chosen(callback: CallbackQuery):
-    region = callback.data.split("_")[1]
-    user_states[callback.from_user.id] = {"region": region}
-    await callback.message.answer(
-        f"✅ Регион {region} выбран!\nВведите продукт и срок в формате:\nПример: Моцарелла 28.07.2025"
-    )
-    await callback.answer()
+    await message.answer("👋 Привет! Выбери регион:", reply_markup=region_kb)
+    user_data[message.from_user.id] = {"stage": "region"}
 
 @dp.message()
-async def get_product(message: Message):
-    uid = message.from_user.id
-    if uid not in user_states or "region" not in user_states[uid]:
-        return await message.answer("⚠️ Сначала выбери регион: /start")
+async def handle_all(message: Message):
+    user_id = message.from_user.id
+    if user_id not in user_data:
+        await message.answer("Нажмите /start чтобы начать.")
+        return
 
-    try:
-        name, date_str = message.text.strip().split()
-        exp_date = datetime.strptime(date_str, "%d.%m.%Y")
-        notify_date = exp_date - timedelta(days=5)
+    data = user_data[user_id]
+    stage = data.get("stage")
 
-        products.append({
-            "chat_id": message.chat.id,
-            "name": name,
-            "exp": exp_date,
-            "notify": notify_date,
-            "region": user_states[uid]["region"]
-        })
-
-        await message.answer(
-            f"📦 Продукт добавлен!\n"
-            f"Название: {name}\n"
-            f"Регион: {user_states[uid]['region']}\n"
-            f"Срок хранения: {exp_date.strftime('%d.%m.%Y')}\n"
-            f"🔔 Напомню: {notify_date.strftime('%d.%m.%Y')}"
-        )
-    except Exception as e:
-        await message.answer("⚠️ Неверный формат. Пример: Моцарелла 28.07.2025")
+    # шаг 1: выбор региона
+    if stage == "region":
+        region = message.text
+        if region not in ["Днепр", "Киев", "Львов"]:
+            await message.answer("❗ Пожалуйста, выбери регион с кнопки.")
+            return
+        data["region"] = region
+        data["stage"] = "name"
+        await message.answer("Введите название продукта:")
+    
+    # шаг 2: ввод названия продукта
+    elif stage == "name":
+        data["name"] = message.text
+        data["stage"] = "date"
+        await message.answer("Введите срок годности в формате ДД.ММ.ГГГГ (например: 28.07.2025):")
+    
+    # шаг 3: ввод даты
+    elif stage == "date":
+        try:
+            exp = datetime.strptime(message.text, "%d.%m.%Y")
+            notify = exp - timedelta(days=5)
+            products.append({
+                "region": data["region"],
+                "name": data["name"],
+                "exp": exp,
+                "notify": notify,
+                "chat_id": message.chat.id
+            })
+            user_data.pop(user_id)
+            await message.answer(
+                f"✅ Продукт добавлен:\n"
+                f"📍 Регион: {data['region']}\n"
+                f"🧀 Продукт: {data['name']}\n"
+                f"📅 Срок: {exp.strftime('%d.%m.%Y')}\n"
+                f"🔔 Напоминание: {notify.strftime('%d.%m.%Y')}",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+        except:
+            await message.answer("❗ Неверный формат даты. Пример: 28.07.2025")
 
 async def reminder_loop():
     while True:
         now = datetime.now().date()
-        for product in products:
-            if product["notify"].date() == now:
+        for p in products:
+            if p["notify"].date() == now:
                 await bot.send_message(
-                    product["chat_id"],
-                    f"⏰ Напоминание!\n"
-                    f"Пора вернуть продукт **{product['name']}** (регион: {product['region']}) на склад.\n"
-                    f"Срок годности: {product['exp'].strftime('%d.%m.%Y')}."
+                    p["chat_id"],
+                    f"📦 Напоминание!\n"
+                    f"Вернуть {p['name']} (регион: {p['region']}) на склад.\n"
+                    f"Срок годности до {p['exp'].strftime('%d.%m.%Y')}."
                 )
-                product["notify"] += timedelta(days=9999)
-        await asyncio.sleep(3600)  # проверять каждый час
+                p["notify"] += timedelta(days=9999)
+        await asyncio.sleep(3600)  # раз в час
 
 async def main():
     asyncio.create_task(reminder_loop())
